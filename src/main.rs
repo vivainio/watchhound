@@ -38,7 +38,17 @@ Features:
 - Highlights recently changed files (within 1 minute) 
 - Split-pane interface with git status and detailed diffs
 - Navigation between changed files with arrow keys
-- Real-time file system monitoring with automatic updates")]
+- Real-time file system monitoring with automatic updates
+- Stores diff history and auto-scrolls to new changes
+- Diff history management with clear functionality
+
+Controls:
+- Left/Right: Navigate between changed files
+- Space: Scroll down through diffs
+- 'r': Manual refresh
+- 'c': Clear diff history
+- 'h': Toggle history view (current file vs accumulated history)
+- 'q' or Esc: Quit")]
 struct Args {
     /// Directory to watch (defaults to current directory). Must be a git repository.
     #[arg(default_value = ".")]
@@ -52,6 +62,14 @@ struct FileInfo {
 }
 
 #[derive(Debug, Clone)]
+struct DiffEntry {
+    timestamp: chrono::DateTime<chrono::Utc>,
+    diff_content: String,
+    file_name: String,
+    previous_diff: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 struct AppState {
     git_stat: String,
     git_diff: String,
@@ -61,19 +79,23 @@ struct AppState {
     scroll_position: u16,
     last_update: Option<chrono::DateTime<Utc>>,
     error_message: Option<String>,
+    diff_history: Vec<DiffEntry>,
+    show_history: bool,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             git_stat: "WatchHound\n\nStarting up...".to_string(),
-            git_diff: "Welcome to WatchHound!\n\nInitializing git repository monitoring...\n\nThis will show colorized git diffs in real-time.".to_string(),
+            git_diff: "Welcome to WatchHound!\n\nInitializing git repository monitoring...\n\nThis will show colorized git diffs in real-time.\nDiff history is automatically stored and scrolls to new changes.\n\nPress 'h' to toggle history view, 'c' to clear history, 'r' to refresh, 'q' to quit.".to_string(),
             changed_files: Vec::new(),
             file_info: HashMap::new(),
             current_file_index: 0,
             scroll_position: 0,
             last_update: None,
             error_message: None,
+            diff_history: Vec::new(),
+            show_history: false,
         }
     }
 }
@@ -172,8 +194,6 @@ impl App {
         
         Text::from(lines)
     }
-
-
 
     fn render(&mut self, f: &mut Frame) {
         let chunks = Layout::default()
@@ -299,7 +319,163 @@ impl App {
         state.scroll_position += 1;
     }
 
+    fn add_diff_to_history(&self, diff_content: String, file_name: String) {
+        let mut state = self.state.lock().unwrap();
+        
+        // Find the previous diff for this file
+        let previous_diff = state.diff_history.iter()
+            .rev()
+            .find(|entry| entry.file_name == file_name)
+            .map(|entry| entry.diff_content.clone());
+        
+        // Add the new diff entry
+        let diff_entry = DiffEntry {
+            timestamp: chrono::Utc::now(),
+            diff_content,
+            file_name,
+            previous_diff,
+        };
+        
+        state.diff_history.push(diff_entry);
+        
+        // Keep only the last 50 diff entries to prevent memory issues
+        if state.diff_history.len() > 50 {
+            state.diff_history.remove(0);
+        }
+    }
+
+    fn find_first_diff_line(&self, current_diff: &str, previous_diff: &str) -> u16 {
+        let current_lines: Vec<&str> = current_diff.lines().collect();
+        let previous_lines: Vec<&str> = previous_diff.lines().collect();
+        
+        // Find the first line that's different between current and previous diff
+        for (i, current_line) in current_lines.iter().enumerate() {
+            if i >= previous_lines.len() || current_line != &previous_lines[i] {
+                // Found the first different line, scroll to it with some context
+                return (i as u16).saturating_sub(2);
+            }
+        }
+        
+        // If we get here, current diff is same as previous (shouldn't happen)
+        // Fall back to smart scroll
+        self.calculate_smart_scroll_position(current_diff)
+    }
+
+
+
+    fn build_accumulated_diff(&self) -> String {
+        let state = self.state.lock().unwrap();
+        let mut accumulated = String::new();
+        
+        for (i, entry) in state.diff_history.iter().enumerate() {
+            if i > 0 {
+                accumulated.push_str("\n\n");
+                accumulated.push_str(&format!("=== Update {} at {} ===", i + 1, entry.timestamp.format("%H:%M:%S")));
+                accumulated.push_str(&format!(" (File: {}) ===\n", entry.file_name));
+            }
+            accumulated.push_str(&entry.diff_content);
+        }
+        
+        accumulated
+    }
+
+    fn calculate_scroll_position_for_new_diff(&self) -> u16 {
+        let state = self.state.lock().unwrap();
+        if state.diff_history.len() <= 1 {
+            return 0;
+        }
+
+        // Calculate lines in all previous diffs
+        let mut lines_count = 0u16;
+        for (i, entry) in state.diff_history.iter().enumerate() {
+            if i == state.diff_history.len() - 1 {
+                break; // Don't count the last (new) entry
+            }
+            
+            if i > 0 {
+                lines_count += 3; // For separator lines
+            }
+            lines_count += entry.diff_content.lines().count() as u16;
+        }
+        
+        lines_count
+    }
+
+    fn auto_scroll_to_new_diff(&self) {
+        let scroll_position = self.calculate_scroll_position_for_new_diff();
+        let mut state = self.state.lock().unwrap();
+        state.scroll_position = scroll_position;
+    }
+
+    fn calculate_smart_scroll_position(&self, diff_content: &str) -> u16 {
+        let lines: Vec<&str> = diff_content.lines().collect();
+        let mut last_addition_line = 0u16;
+        
+        // Find the last line that contains an addition (starts with +)
+        for (i, line) in lines.iter().enumerate() {
+            if line.starts_with('+') && !line.starts_with("+++") {
+                last_addition_line = i as u16;
+            }
+        }
+        
+        // If we found additions, scroll to show them (with some context)
+        if last_addition_line > 0 {
+            // Show the addition with some context lines before it
+            last_addition_line.saturating_sub(3)
+        } else {
+            // If no additions found, look for the end of the diff
+            let total_lines = lines.len() as u16;
+            if total_lines > 10 {
+                total_lines.saturating_sub(8)
+            } else {
+                0
+            }
+        }
+    }
+
+    fn clear_diff_history(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.diff_history.clear();
+        state.git_diff = "Diff history cleared.\n\nMake changes to files to see new diffs here.".to_string();
+        state.scroll_position = 0;
+    }
+
+    fn toggle_history_view(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.show_history = !state.show_history;
+        state.scroll_position = 0;
+    }
+
+    async fn refresh_display(&self) {
+        let show_history = {
+            let state = self.state.lock().unwrap();
+            state.show_history
+        };
+
+        if show_history {
+            // Show accumulated history
+            let accumulated_diff = self.build_accumulated_diff();
+            let mut state = self.state.lock().unwrap();
+            state.git_diff = if accumulated_diff.is_empty() {
+                "No diff history available.\n\nMake changes to files to see diffs here.\n\nPress 'h' to toggle back to current file view.".to_string()
+            } else {
+                accumulated_diff
+            };
+        } else {
+            // Show current file diff only
+            self.update_current_file_diff().await;
+        }
+    }
+
     async fn update_current_file_diff(&self) {
+        self.update_current_file_diff_internal(false).await;
+    }
+
+    async fn update_current_file_diff_with_history(&self) {
+        self.update_current_file_diff_internal(true).await;
+    }
+
+    async fn update_current_file_diff_internal(&self, store_in_history: bool) {
         let current_file = {
             let state = self.state.lock().unwrap();
             if state.changed_files.is_empty() {
@@ -308,7 +484,7 @@ impl App {
             state.changed_files[state.current_file_index].clone()
         };
 
-        // Show loading state
+        // Show loading state (but don't store this in history)
         {
             let mut state = self.state.lock().unwrap();
             state.git_diff = format!("Loading diff for {}...", current_file);
@@ -330,9 +506,55 @@ impl App {
             }
         };
 
-        {
-            let mut state = self.state.lock().unwrap();
-            state.git_diff = git_diff;
+        if store_in_history {
+            // Find the previous diff for incremental change calculation
+            let previous_diff = {
+                let state = self.state.lock().unwrap();
+                state.diff_history.iter()
+                    .rev()
+                    .find(|entry| entry.file_name == current_file)
+                    .map(|entry| entry.diff_content.clone())
+            };
+            
+            // Calculate scroll position for the first different line
+            let scroll_position = if let Some(ref prev_diff) = previous_diff {
+                self.find_first_diff_line(&git_diff, prev_diff)
+            } else {
+                self.calculate_smart_scroll_position(&git_diff)
+            };
+            
+            // Store the diff in history
+            self.add_diff_to_history(git_diff.clone(), current_file.clone());
+            
+            // Check if we should show history or current file
+            let show_history = {
+                let state = self.state.lock().unwrap();
+                state.show_history
+            };
+            
+            if show_history {
+                // Build and set the accumulated diff with auto-scroll for history view
+                self.auto_scroll_to_new_diff();
+                let accumulated_diff = self.build_accumulated_diff();
+                {
+                    let mut state = self.state.lock().unwrap();
+                    state.git_diff = accumulated_diff;
+                }
+            } else {
+                // Show current file diff and scroll to show the first different line
+                {
+                    let mut state = self.state.lock().unwrap();
+                    state.git_diff = git_diff.clone();
+                    // Use the calculated scroll position to show the first different line
+                    state.scroll_position = scroll_position;
+                }
+            }
+        } else {
+            // Just show the current diff without storing in history
+            {
+                let mut state = self.state.lock().unwrap();
+                state.git_diff = git_diff;
+            }
         }
     }
 
@@ -387,11 +609,16 @@ impl App {
         };
 
         if has_files {
-            self.update_current_file_diff().await;
+            self.update_current_file_diff_with_history().await;
         } else {
             // No files to show diff for
+            let no_changes_message = "No changes to display.\n\nTo see colorized diffs:\n1. Make changes to files\n2. Use 'r' to refresh\n3. Use Left/Right to navigate files\n4. Use Space to scroll\n5. Use 'h' to toggle history view\n6. Use 'c' to clear diff history\n\nRecently changed files will be highlighted!\nDiff history is automatically stored and scrolls to new changes.".to_string();
+            
+            // Store the initial message in history
+            self.add_diff_to_history(no_changes_message.clone(), "Initial State".to_string());
+            
             let mut state = self.state.lock().unwrap();
-            state.git_diff = "No changes to display.\n\nTo see colorized diffs:\n1. Make changes to files\n2. Use 'r' to refresh\n3. Use Left/Right to navigate files\n4. Use Space to scroll\n\nRecently changed files will be highlighted!".to_string();
+            state.git_diff = no_changes_message;
         }
 
         Ok(())
@@ -453,19 +680,19 @@ impl App {
                 }
                 
                 state.current_file_index = new_index;
-                state.scroll_position = 0;
+                // Don't reset scroll position here - let auto-scroll handle it
             }
             
             state.changed_files = changed_files;
             state.last_update = Some(Utc::now());
         }
 
-        // Get diff for current file
+        // Get diff for current file - store in history since this is a real file change
         if !{
             let state = self.state.lock().unwrap();
             state.changed_files.is_empty()
         } {
-            self.update_current_file_diff().await;
+            self.update_current_file_diff_with_history().await;
         }
 
         Ok(())
@@ -532,6 +759,7 @@ impl App {
             }
         }
     }
+
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -715,6 +943,19 @@ async fn main() -> Result<()> {
                             }
                             KeyCode::Char(' ') => {
                                 app.scroll_down();
+                            }
+                            KeyCode::Char('c') => {
+                                // Clear diff history
+                                app.clear_diff_history();
+                            }
+                            KeyCode::Char('h') => {
+                                // Toggle history view
+                                app.toggle_history_view();
+                                let mut app_clone = App::new(app.directory.clone());
+                                app_clone.state = app.state.clone();
+                                tokio::spawn(async move {
+                                    app_clone.refresh_display().await;
+                                });
                             }
                             _ => {}
                         }

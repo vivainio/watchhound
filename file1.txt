@@ -1,4 +1,11 @@
 ﻿Original content in file 1
+hei
+
+oeoeoe
+
+
+oo
+
 
 
 test
@@ -7,3 +14,7 @@ test
 MODIFIED line added to file 1!
 Another change in file 1
 Test change for file1 - 07/04/2025 19:23:10
+Test change for diff history - 07/04/2025 21:16:10
+NEW LINE ADDED - 07/04/2025 21:33:01
+INCREMENTAL TEST LINE - 07/04/2025 21:36:11
+SIMPLIFIED SCROLL TEST - 07/04/2025 21:41:30
