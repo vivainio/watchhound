@@ -4,9 +4,12 @@ A full-screen terminal application that watches a directory for file system chan
 
 ## Features
 
+- **Immediate Loading**: Shows current git diff snapshot immediately on startup
 - **File System Monitoring**: Watches a specified directory for file changes
 - **Git Integration**: Automatically runs `git diff --stat` and shows detailed diffs
-- **Split-Pane Interface**: Left pane shows git status, right pane shows diff for most recently changed file
+- **Split-Pane Interface**: Left pane shows git status, right pane shows diff for current file
+- **File Navigation**: Use left/right arrow keys to navigate between changed files
+- **Diff Scrolling**: Use space bar to scroll through long diffs
 - **Debouncing**: Waits 5 seconds after file changes before updating (prevents excessive git operations)
 - **Cross-Platform**: Works on Windows, macOS, and Linux
 - **Real-Time Updates**: Updates automatically when files change
@@ -61,23 +64,26 @@ watchhound C:\path\to\my\project
 
 - **q** or **Esc**: Quit the application
 - **r**: Manually refresh the git status
+- **← →** (Left/Right arrows): Navigate between changed files
+- **Space**: Scroll down the current diff
 
 ## Interface
 
 The application displays a split-screen interface:
 
 - **Left Pane**: Shows the output of `git diff --stat` with a summary of changed files
-- **Right Pane**: Shows the detailed `git diff` for the most recently changed file
-- **Status Bar**: Shows the last update time at the bottom of the screen
+- **Right Pane**: Shows the detailed `git diff` for the current file (with file navigation indicator)
+- **Status Bar**: Shows navigation controls and last update time at the bottom of the screen
 - **Error Messages**: Displays any git or file system errors in a popup
 
 ## How It Works
 
-1. **File Watching**: Uses the `notify` crate to monitor file system events
-2. **Debouncing**: Collects file change events and waits 5 seconds before processing
-3. **Git Operations**: Runs `git diff --stat` to get an overview and `git diff` for specific files
-4. **Terminal UI**: Uses `ratatui` for the split-pane terminal interface
-5. **Async Processing**: Uses `tokio` for concurrent file watching and UI updates
+1. **Immediate Loading**: Loads current git diff state immediately when application starts
+2. **File Watching**: Uses the `notify` crate to monitor file system events
+3. **Debouncing**: Collects file change events and waits 5 seconds before processing
+4. **Git Operations**: Runs `git diff --stat` to get an overview and `git diff` for specific files
+5. **Terminal UI**: Uses `ratatui` for the split-pane terminal interface
+6. **Async Processing**: Uses `tokio` for concurrent file watching and UI updates
 
 ## Dependencies
 

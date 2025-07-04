@@ -11,6 +11,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
+
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame, Terminal,
 };
@@ -39,7 +40,9 @@ struct Args {
 struct AppState {
     git_stat: String,
     git_diff: String,
-    last_changed_file: Option<String>,
+    changed_files: Vec<String>,
+    current_file_index: usize,
+    scroll_position: u16,
     last_update: Option<chrono::DateTime<Utc>>,
     error_message: Option<String>,
 }
@@ -49,7 +52,9 @@ impl Default for AppState {
         Self {
             git_stat: String::new(),
             git_diff: String::new(),
-            last_changed_file: None,
+            changed_files: Vec::new(),
+            current_file_index: 0,
+            scroll_position: 0,
             last_update: None,
             error_message: None,
         }
@@ -86,7 +91,7 @@ impl App {
             .style(Style::default().fg(Color::White));
 
         let git_stat_text = if state.git_stat.is_empty() {
-            "Waiting for file changes...".to_string()
+            "No changes detected".to_string()
         } else {
             state.git_stat.clone()
         };
@@ -98,8 +103,9 @@ impl App {
         f.render_widget(git_stat_paragraph, chunks[0]);
 
         // Right pane - git diff
-        let right_title = if let Some(file) = &state.last_changed_file {
-            format!("Git Diff - {}", file)
+        let right_title = if !state.changed_files.is_empty() {
+            let current_file = &state.changed_files[state.current_file_index];
+            format!("Git Diff - {} ({}/{})", current_file, state.current_file_index + 1, state.changed_files.len())
         } else {
             "Git Diff".to_string()
         };
@@ -117,7 +123,8 @@ impl App {
 
         let git_diff_paragraph = Paragraph::new(git_diff_text)
             .block(right_block)
-            .wrap(Wrap { trim: true });
+            .wrap(Wrap { trim: true })
+            .scroll((state.scroll_position, 0));
 
         f.render_widget(git_diff_paragraph, chunks[1]);
 
@@ -137,21 +144,110 @@ impl App {
             f.render_widget(error_paragraph, error_area);
         }
 
-        // Show last update time
-        if let Some(last_update) = &state.last_update {
-            let status_line = format!("Last updated: {}", last_update.format("%H:%M:%S"));
-            let status_area = Rect {
-                x: 0,
-                y: f.size().height - 1,
-                width: f.size().width,
-                height: 1,
-            };
-            
-            let status_paragraph = Paragraph::new(status_line)
-                .style(Style::default().fg(Color::Gray));
-            
-            f.render_widget(status_paragraph, status_area);
+        // Show controls and last update time
+        let controls = "Controls: ←→ Navigate files | Space: Scroll down | q: Quit | r: Refresh";
+        let status_line = if let Some(last_update) = &state.last_update {
+            format!("{} | Last updated: {}", controls, last_update.format("%H:%M:%S"))
+        } else {
+            controls.to_string()
+        };
+
+        let status_area = Rect {
+            x: 0,
+            y: f.size().height - 1,
+            width: f.size().width,
+            height: 1,
+        };
+        
+        let status_paragraph = Paragraph::new(status_line)
+            .style(Style::default().fg(Color::Gray));
+        
+        f.render_widget(status_paragraph, status_area);
+    }
+
+    fn navigate_to_previous_file(&self) {
+        let mut state = self.state.lock().unwrap();
+        if !state.changed_files.is_empty() && state.current_file_index > 0 {
+            state.current_file_index -= 1;
+            state.scroll_position = 0; // Reset scroll when changing files
         }
+    }
+
+    fn navigate_to_next_file(&self) {
+        let mut state = self.state.lock().unwrap();
+        if !state.changed_files.is_empty() && state.current_file_index < state.changed_files.len() - 1 {
+            state.current_file_index += 1;
+            state.scroll_position = 0; // Reset scroll when changing files
+        }
+    }
+
+    fn scroll_down(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.scroll_position += 1;
+    }
+
+    async fn update_current_file_diff(&self) {
+        let current_file = {
+            let state = self.state.lock().unwrap();
+            if state.changed_files.is_empty() {
+                return;
+            }
+            state.changed_files[state.current_file_index].clone()
+        };
+
+        let git_diff = match self.run_git_diff_for_file(&current_file).await {
+            Ok(output) => output,
+            Err(e) => {
+                format!("Error getting diff for {}: {}", current_file, e)
+            }
+        };
+
+        {
+            let mut state = self.state.lock().unwrap();
+            state.git_diff = git_diff;
+        }
+    }
+
+    async fn load_initial_state(&self) -> Result<()> {
+        // Get initial git diff --stat
+        let git_stat = match self.run_git_diff_stat().await {
+            Ok(output) => output,
+            Err(e) => {
+                let mut state = self.state.lock().unwrap();
+                state.error_message = Some(format!("Git stat error: {}", e));
+                return Ok(());
+            }
+        };
+
+        // Get all changed files
+        let changed_files = match self.get_changed_files().await {
+            Ok(files) => files,
+            Err(e) => {
+                let mut state = self.state.lock().unwrap();
+                state.error_message = Some(format!("Error finding changed files: {}", e));
+                return Ok(());
+            }
+        };
+
+        // Update state with initial data
+        {
+            let mut state = self.state.lock().unwrap();
+            state.git_stat = git_stat;
+            state.changed_files = changed_files;
+            state.current_file_index = 0;
+            state.scroll_position = 0;
+            state.last_update = Some(Utc::now());
+        }
+
+        // Get diff for first file if available
+        if !{
+            let state = self.state.lock().unwrap();
+            state.changed_files.is_empty()
+        } {
+            self.update_current_file_diff().await;
+        }
+
+        Ok(())
     }
 
     async fn handle_file_change(&self, _path: &Path) -> Result<()> {
@@ -174,35 +270,35 @@ impl App {
             }
         };
 
-        // Get the most recently changed file
-        let most_recent_file = match self.get_most_recent_changed_file().await {
-            Ok(file) => file,
+        // Get all changed files
+        let changed_files = match self.get_changed_files().await {
+            Ok(files) => files,
             Err(e) => {
                 let mut state = self.state.lock().unwrap();
-                state.error_message = Some(format!("Error finding recent file: {}", e));
+                state.error_message = Some(format!("Error finding changed files: {}", e));
                 return Ok(());
             }
         };
 
-        // Run git diff for the most recent file
-        let git_diff = if let Some(ref file) = most_recent_file {
-            match self.run_git_diff_for_file(file).await {
-                Ok(output) => output,
-                Err(e) => {
-                    format!("Error getting diff for {}: {}", file, e)
-                }
-            }
-        } else {
-            "No recent changes found".to_string()
-        };
-
-        // Update state
+        // Update state with new files list
         {
             let mut state = self.state.lock().unwrap();
             state.git_stat = git_stat;
-            state.git_diff = git_diff;
-            state.last_changed_file = most_recent_file;
+            state.changed_files = changed_files;
+            // Reset to first file if files changed
+            if !state.changed_files.is_empty() {
+                state.current_file_index = 0;
+                state.scroll_position = 0;
+            }
             state.last_update = Some(Utc::now());
+        }
+
+        // Get diff for current file
+        if !{
+            let state = self.state.lock().unwrap();
+            state.changed_files.is_empty()
+        } {
+            self.update_current_file_diff().await;
         }
 
         Ok(())
@@ -234,7 +330,7 @@ impl App {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
-    async fn get_most_recent_changed_file(&self) -> Result<Option<String>> {
+    async fn get_changed_files(&self) -> Result<Vec<String>> {
         let output = Command::new("git")
             .args(["diff", "--name-only"])
             .current_dir(&self.directory)
@@ -245,15 +341,9 @@ impl App {
         }
 
         let files = String::from_utf8_lossy(&output.stdout);
-        let files: Vec<&str> = files.trim().lines().collect();
+        let files: Vec<String> = files.trim().lines().map(|s| s.to_string()).collect();
         
-        if files.is_empty() {
-            return Ok(None);
-        }
-
-        // For now, just return the first file. In a more sophisticated version,
-        // we could check file modification times to find the most recent.
-        Ok(Some(files[0].to_string()))
+        Ok(files)
     }
 }
 
@@ -350,6 +440,11 @@ async fn main() -> Result<()> {
     // Create app
     let mut app = App::new(args.directory.clone());
     
+    // Load initial state immediately
+    if let Err(e) = app.load_initial_state().await {
+        eprintln!("Error loading initial state: {}", e);
+    }
+    
     // Start file watcher in background
     let watcher_state = app.state.clone();
     let watcher_directory = args.directory.clone();
@@ -375,12 +470,30 @@ async fn main() -> Result<()> {
                             // Manual refresh
                             let mut app_clone = App::new(app.directory.clone());
                             app_clone.state = app.state.clone();
-                            let dummy_path = app.directory.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = app_clone.handle_file_change(&dummy_path).await {
+                                if let Err(e) = app_clone.load_initial_state().await {
                                     eprintln!("Error during manual refresh: {}", e);
                                 }
                             });
+                        }
+                        KeyCode::Left => {
+                            app.navigate_to_previous_file();
+                            let mut app_clone = App::new(app.directory.clone());
+                            app_clone.state = app.state.clone();
+                            tokio::spawn(async move {
+                                app_clone.update_current_file_diff().await;
+                            });
+                        }
+                        KeyCode::Right => {
+                            app.navigate_to_next_file();
+                            let mut app_clone = App::new(app.directory.clone());
+                            app_clone.state = app.state.clone();
+                            tokio::spawn(async move {
+                                app_clone.update_current_file_diff().await;
+                            });
+                        }
+                        KeyCode::Char(' ') => {
+                            app.scroll_down();
                         }
                         _ => {}
                     }
