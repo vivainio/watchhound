@@ -17,22 +17,19 @@ use ratatui::{
 };
 use std::{
     collections::HashMap,
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
-    process::{Command, exit},
+    process::{exit, Command},
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
 };
-use tokio::{
-    sync::mpsc,
-    time::sleep,
-};
+use tokio::{sync::mpsc, time::sleep};
 
 #[derive(Parser, Debug)]
 #[command(name = "watchhound")]
 #[command(about = "A file system watcher that shows git diff information with colors")]
-#[command(long_about = "WatchHound monitors a git repository for changes and displays colorized diffs in real-time.
+#[command(
+    long_about = "WatchHound monitors a git repository for changes and displays colorized diffs in real-time.
 Features:
 - Colorized git diff display (green for additions, red for deletions)
 - Highlights recently changed files (within 1 minute) 
@@ -49,7 +46,8 @@ Controls:
 - 'r': Manual refresh
 - 'c': Clear diff history
 - 'h': Toggle history view (current file vs accumulated history)
-- 'q' or Esc: Quit")]
+- 'q' or Esc: Quit"
+)]
 struct Args {
     /// Directory to watch (defaults to current directory). Must be a git repository.
     #[arg(default_value = ".")]
@@ -58,7 +56,6 @@ struct Args {
 
 #[derive(Debug, Clone)]
 struct FileInfo {
-    path: String,
     last_modified: SystemTime,
 }
 
@@ -67,7 +64,6 @@ struct DiffEntry {
     timestamp: chrono::DateTime<chrono::Utc>,
     diff_content: String,
     file_name: String,
-    previous_diff: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,24 +115,42 @@ impl App {
     fn parse_diff_line(line: &str) -> Line<'static> {
         let spans = if line.starts_with("@@") {
             // Context header (cyan)
-            vec![Span::styled(line.to_string(), Style::default().fg(Color::Cyan))]
+            vec![Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::Cyan),
+            )]
         } else if line.starts_with("+++") || line.starts_with("---") {
             // File headers (white/gray)
-            vec![Span::styled(line.to_string(), Style::default().fg(Color::Gray))]
+            vec![Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::Gray),
+            )]
         } else if line.starts_with('+') {
             // Added lines (green)
-            vec![Span::styled(line.to_string(), Style::default().fg(Color::Green))]
+            vec![Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::Green),
+            )]
         } else if line.starts_with('-') {
             // Removed lines (red)
-            vec![Span::styled(line.to_string(), Style::default().fg(Color::Red))]
+            vec![Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::Red),
+            )]
         } else if line.starts_with("index ") || line.starts_with("diff --git") {
             // Git metadata (gray)
-            vec![Span::styled(line.to_string(), Style::default().fg(Color::Gray))]
+            vec![Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::Gray),
+            )]
         } else {
             // Context lines (white)
-            vec![Span::styled(line.to_string(), Style::default().fg(Color::White))]
+            vec![Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::White),
+            )]
         };
-        
+
         Line::from(spans)
     }
 
@@ -145,11 +159,14 @@ impl App {
             .lines()
             .map(|line| Self::parse_diff_line(line))
             .collect();
-        
+
         Text::from(lines)
     }
 
-    fn format_git_stat_with_status(git_stat: &str, file_mod_status: &HashMap<String, bool>) -> Text<'static> {
+    fn format_git_stat_with_status(
+        git_stat: &str,
+        file_mod_status: &HashMap<String, bool>,
+    ) -> Text<'static> {
         let lines: Vec<Line> = git_stat
             .lines()
             .map(|line| {
@@ -159,19 +176,24 @@ impl App {
                     if parts.len() >= 2 {
                         let file_part = parts[0].trim().to_string();
                         let stats_part = parts[1].trim().to_string();
-                        
+
                         // Check if file was recently modified (within 1 minute)
                         let is_recent = file_mod_status.get(&file_part).unwrap_or(&false);
-                        let file_color = if *is_recent { Color::Yellow } else { Color::White };
-                        
+                        let file_color = if *is_recent {
+                            Color::Yellow
+                        } else {
+                            Color::White
+                        };
+
                         let mut spans = vec![
                             Span::styled(file_part, Style::default().fg(file_color)),
                             Span::styled(" | ".to_string(), Style::default().fg(Color::Gray)),
                         ];
-                        
+
                         // Color the stats part
                         if stats_part.contains('+') && stats_part.contains('-') {
-                            spans.push(Span::styled(stats_part, Style::default().fg(Color::Yellow)));
+                            spans
+                                .push(Span::styled(stats_part, Style::default().fg(Color::Yellow)));
                         } else if stats_part.contains('+') {
                             spans.push(Span::styled(stats_part, Style::default().fg(Color::Green)));
                         } else if stats_part.contains('-') {
@@ -179,20 +201,32 @@ impl App {
                         } else {
                             spans.push(Span::styled(stats_part, Style::default().fg(Color::White)));
                         }
-                        
+
                         Line::from(spans)
                     } else {
-                        Line::from(vec![Span::styled(line.to_string(), Style::default().fg(Color::White))])
+                        Line::from(vec![Span::styled(
+                            line.to_string(),
+                            Style::default().fg(Color::White),
+                        )])
                     }
-                } else if line.contains("changed") || line.contains("insertion") || line.contains("deletion") {
+                } else if line.contains("changed")
+                    || line.contains("insertion")
+                    || line.contains("deletion")
+                {
                     // Summary line
-                    Line::from(vec![Span::styled(line.to_string(), Style::default().fg(Color::Cyan))])
+                    Line::from(vec![Span::styled(
+                        line.to_string(),
+                        Style::default().fg(Color::Cyan),
+                    )])
                 } else {
-                    Line::from(vec![Span::styled(line.to_string(), Style::default().fg(Color::White))])
+                    Line::from(vec![Span::styled(
+                        line.to_string(),
+                        Style::default().fg(Color::White),
+                    )])
                 }
             })
             .collect();
-        
+
         Text::from(lines)
     }
 
@@ -203,9 +237,11 @@ impl App {
             .split(f.size());
 
         let state = self.state.lock().unwrap();
-        
+
         // Pre-compute file modification status to avoid deadlock
-        let file_mod_status: HashMap<String, bool> = state.file_info.iter()
+        let file_mod_status: HashMap<String, bool> = state
+            .file_info
+            .iter()
             .map(|(path, info)| {
                 let is_recent = if let Ok(elapsed) = info.last_modified.elapsed() {
                     elapsed < Duration::from_secs(60)
@@ -215,7 +251,7 @@ impl App {
                 (path.clone(), is_recent)
             })
             .collect();
-        
+
         // Left pane - git stat
         let left_block = Block::default()
             .title("Git Status")
@@ -239,7 +275,13 @@ impl App {
             let current_file = &state.changed_files[state.current_file_index];
             let is_recent = file_mod_status.get(current_file).unwrap_or(&false);
             let indicator = if *is_recent { " [RECENT]" } else { "" };
-            format!("Git Diff - {}{} ({}/{})", current_file, indicator, state.current_file_index + 1, state.changed_files.len())
+            format!(
+                "Git Diff - {}{} ({}/{})",
+                current_file,
+                indicator,
+                state.current_file_index + 1,
+                state.changed_files.len()
+            )
         } else {
             "Git Diff".to_string()
         };
@@ -270,18 +312,22 @@ impl App {
                 .title("Error")
                 .borders(Borders::ALL)
                 .style(Style::default().fg(Color::Red));
-            
+
             let error_paragraph = Paragraph::new(error.clone())
                 .block(error_block)
                 .wrap(Wrap { trim: true });
-            
+
             f.render_widget(error_paragraph, error_area);
         }
 
         // Show controls and last update time
         let controls = "Controls: Left/Right: Navigate files | Space: Scroll down | q: Quit | r: Refresh | [RECENT] = Recently changed";
         let status_line = if let Some(last_update) = &state.last_update {
-            format!("{} | Last updated: {}", controls, last_update.format("%H:%M:%S"))
+            format!(
+                "{} | Last updated: {}",
+                controls,
+                last_update.format("%H:%M:%S")
+            )
         } else {
             controls.to_string()
         };
@@ -292,10 +338,9 @@ impl App {
             width: f.size().width,
             height: 1,
         };
-        
-        let status_paragraph = Paragraph::new(status_line)
-            .style(Style::default().fg(Color::Gray));
-        
+
+        let status_paragraph = Paragraph::new(status_line).style(Style::default().fg(Color::Gray));
+
         f.render_widget(status_paragraph, status_area);
     }
 
@@ -309,7 +354,9 @@ impl App {
 
     fn navigate_to_next_file(&self) {
         let mut state = self.state.lock().unwrap();
-        if !state.changed_files.is_empty() && state.current_file_index < state.changed_files.len() - 1 {
+        if !state.changed_files.is_empty()
+            && state.current_file_index < state.changed_files.len() - 1
+        {
             state.current_file_index += 1;
             state.scroll_position = 0; // Reset scroll when changing files
         }
@@ -320,10 +367,7 @@ impl App {
         state.scroll_position += 1;
     }
 
-    fn scroll_up(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.scroll_position = state.scroll_position.saturating_sub(1);
-    }
+
 
     fn scroll_down_fast(&self) {
         let mut state = self.state.lock().unwrap();
@@ -337,23 +381,16 @@ impl App {
 
     fn add_diff_to_history(&self, diff_content: String, file_name: String) {
         let mut state = self.state.lock().unwrap();
-        
-        // Find the previous diff for this file
-        let previous_diff = state.diff_history.iter()
-            .rev()
-            .find(|entry| entry.file_name == file_name)
-            .map(|entry| entry.diff_content.clone());
-        
+
         // Add the new diff entry
         let diff_entry = DiffEntry {
             timestamp: chrono::Utc::now(),
             diff_content,
             file_name,
-            previous_diff,
         };
-        
+
         state.diff_history.push(diff_entry);
-        
+
         // Keep only the last 50 diff entries to prevent memory issues
         if state.diff_history.len() > 50 {
             state.diff_history.remove(0);
@@ -363,7 +400,7 @@ impl App {
     fn find_first_diff_line(&self, current_diff: &str, previous_diff: &str) -> u16 {
         let current_lines: Vec<&str> = current_diff.lines().collect();
         let previous_lines: Vec<&str> = previous_diff.lines().collect();
-        
+
         // Find the first line that's different between current and previous diff
         let mut first_different_line = None;
         for (i, current_line) in current_lines.iter().enumerate() {
@@ -372,52 +409,49 @@ impl App {
                 break;
             }
         }
-        
+
         if let Some(diff_start) = first_different_line {
             // Now find the first actual content change (+ or - line) starting from the different line
             for (i, line) in current_lines.iter().enumerate().skip(diff_start) {
-                if line.starts_with('+') && !line.starts_with("+++") {
-                    // Found the first addition, scroll to show it with context
-                    return (i as u16).saturating_sub(3);
-                } else if line.starts_with('-') && !line.starts_with("---") {
-                    // Found the first deletion, scroll to show it with context
+                if (line.starts_with('+') && !line.starts_with("+++")) || (line.starts_with('-') && !line.starts_with("---")) {
+                    // Found the first addition or deletion, scroll to show it with context
                     return (i as u16).saturating_sub(3);
                 } else if line.starts_with("@@") {
                     // Found a hunk header, look for content changes after it
                     for (j, content_line) in current_lines.iter().enumerate().skip(i + 1) {
-                        if content_line.starts_with('+') && !content_line.starts_with("+++") {
-                            return (j as u16).saturating_sub(3);
-                        } else if content_line.starts_with('-') && !content_line.starts_with("---") {
+                        if (content_line.starts_with('+') && !content_line.starts_with("+++")) || (content_line.starts_with('-') && !content_line.starts_with("---")) {
                             return (j as u16).saturating_sub(3);
                         }
                     }
                 }
             }
-            
+
             // If no content changes found, just scroll to the first different line
             return (diff_start as u16).saturating_sub(2);
         }
-        
+
         // If we get here, current diff is same as previous (shouldn't happen)
         // Fall back to smart scroll
         self.calculate_smart_scroll_position(current_diff)
     }
 
-
-
     fn build_accumulated_diff(&self) -> String {
         let state = self.state.lock().unwrap();
         let mut accumulated = String::new();
-        
+
         for (i, entry) in state.diff_history.iter().enumerate() {
             if i > 0 {
                 accumulated.push_str("\n\n");
-                accumulated.push_str(&format!("=== Update {} at {} ===", i + 1, entry.timestamp.format("%H:%M:%S")));
+                accumulated.push_str(&format!(
+                    "=== Update {} at {} ===",
+                    i + 1,
+                    entry.timestamp.format("%H:%M:%S")
+                ));
                 accumulated.push_str(&format!(" (File: {}) ===\n", entry.file_name));
             }
             accumulated.push_str(&entry.diff_content);
         }
-        
+
         accumulated
     }
 
@@ -433,13 +467,13 @@ impl App {
             if i == state.diff_history.len() - 1 {
                 break; // Don't count the last (new) entry
             }
-            
+
             if i > 0 {
                 lines_count += 3; // For separator lines
             }
             lines_count += entry.diff_content.lines().count() as u16;
         }
-        
+
         lines_count
     }
 
@@ -452,7 +486,7 @@ impl App {
     fn calculate_smart_scroll_position(&self, diff_content: &str) -> u16 {
         let lines: Vec<&str> = diff_content.lines().collect();
         let mut first_addition_line = None;
-        
+
         // Find the first line that contains an addition (starts with +)
         for (i, line) in lines.iter().enumerate() {
             if line.starts_with('+') && !line.starts_with("+++") {
@@ -460,7 +494,7 @@ impl App {
                 break; // Found the first addition, stop looking
             }
         }
-        
+
         // If we found additions, scroll to show them (with some context)
         if let Some(first_line) = first_addition_line {
             // Show the addition with some context lines before it
@@ -479,7 +513,8 @@ impl App {
     fn clear_diff_history(&self) {
         let mut state = self.state.lock().unwrap();
         state.diff_history.clear();
-        state.git_diff = "Diff history cleared.\n\nMake changes to files to see new diffs here.".to_string();
+        state.git_diff =
+            "Diff history cleared.\n\nMake changes to files to see new diffs here.".to_string();
         state.scroll_position = 0;
     }
 
@@ -530,7 +565,7 @@ impl App {
         // Show loading state (but don't store this in history)
         {
             let mut state = self.state.lock().unwrap();
-            state.git_diff = format!("Loading diff for {}...", current_file);
+            state.git_diff = format!("Loading diff for {current_file}...");
         }
 
         // Brief delay to show loading state
@@ -539,13 +574,13 @@ impl App {
         let git_diff = match self.run_git_diff_for_file(&current_file).await {
             Ok(output) => {
                 if output.trim().is_empty() {
-                    format!("No changes in {}\n\nThis file may have been staged or the changes may be minimal.", current_file)
+                    format!("No changes in {current_file}\n\nThis file may have been staged or the changes may be minimal.")
                 } else {
                     output
                 }
-            },
+            }
             Err(e) => {
-                format!("Error getting diff for {}: {}\n\nTry refreshing with 'r' or check if the file still exists.", current_file, e)
+                format!("Error getting diff for {current_file}: {e}\n\nTry refreshing with 'r' or check if the file still exists.")
             }
         };
 
@@ -553,12 +588,14 @@ impl App {
             // Find the previous diff for this file to compare against
             let previous_diff = {
                 let state = self.state.lock().unwrap();
-                state.diff_history.iter()
+                state
+                    .diff_history
+                    .iter()
                     .rev()
                     .find(|entry| entry.file_name == current_file)
                     .map(|entry| entry.diff_content.clone())
             };
-            
+
             // Calculate scroll position based on what's actually new
             let scroll_position = if let Some(ref prev_diff) = previous_diff {
                 // Find the first line that's different from the previous diff
@@ -567,16 +604,16 @@ impl App {
                 // No previous diff, use smart scrolling to find first addition
                 self.calculate_smart_scroll_position(&git_diff)
             };
-            
+
             // Store the diff in history
             self.add_diff_to_history(git_diff.clone(), current_file.clone());
-            
+
             // Check if we should show history or current file
             let show_history = {
                 let state = self.state.lock().unwrap();
                 state.show_history
             };
-            
+
             if show_history {
                 // Build and set the accumulated diff with auto-scroll for history view
                 self.auto_scroll_to_new_diff();
@@ -608,7 +645,8 @@ impl App {
         {
             let mut state = self.state.lock().unwrap();
             state.git_stat = "WatchHound starting up...\nLoading git status...".to_string();
-            state.git_diff = "Initializing git repository scan...\n\nChecking for changes...".to_string();
+            state.git_diff =
+                "Initializing git repository scan...\n\nChecking for changes...".to_string();
         }
 
         // Brief delay to show loading state
@@ -622,7 +660,7 @@ impl App {
                 } else {
                     output
                 }
-            },
+            }
             Err(e) => {
                 return Err(anyhow::anyhow!("Failed to get git status: {}", e));
             }
@@ -658,10 +696,10 @@ impl App {
         } else {
             // No files to show diff for
             let no_changes_message = "No changes to display.\n\nTo see colorized diffs:\n1. Make changes to files\n2. Use 'r' to refresh\n3. Use Left/Right to navigate files\n4. Use Space to scroll\n5. Use 'h' to toggle history view\n6. Use 'c' to clear diff history\n\nRecently changed files will be highlighted!\nDiff history is automatically stored and scrolls to new changes.".to_string();
-            
+
             // Store the initial message in history
             self.add_diff_to_history(no_changes_message.clone(), "Initial State".to_string());
-            
+
             let mut state = self.state.lock().unwrap();
             state.git_diff = no_changes_message;
         }
@@ -684,7 +722,7 @@ impl App {
             Ok(output) => output,
             Err(e) => {
                 let mut state = self.state.lock().unwrap();
-                state.error_message = Some(format!("Git stat error: {}", e));
+                state.error_message = Some(format!("Git stat error: {e}"));
                 return Ok(());
             }
         };
@@ -694,7 +732,7 @@ impl App {
             Ok(files) => files,
             Err(e) => {
                 let mut state = self.state.lock().unwrap();
-                state.error_message = Some(format!("Error finding changed files: {}", e));
+                state.error_message = Some(format!("Error finding changed files: {e}"));
                 return Ok(());
             }
         };
@@ -703,11 +741,11 @@ impl App {
         {
             let mut state = self.state.lock().unwrap();
             state.git_stat = git_stat;
-            
+
             // Find the index of the changed file to display it
             let changed_file_path = path.to_string_lossy().to_string();
             let mut new_index = 0;
-            
+
             if !changed_files.is_empty() {
                 // Try to find the exact file that changed
                 if let Some(index) = changed_files.iter().position(|f| f == &changed_file_path) {
@@ -717,17 +755,21 @@ impl App {
                     // This handles cases where the watcher might give absolute paths but git gives relative paths
                     let changed_file_name = path.file_name().unwrap_or_default().to_string_lossy();
                     if let Some(index) = changed_files.iter().position(|f| {
-                        Path::new(f).file_name().unwrap_or_default().to_string_lossy() == changed_file_name
+                        Path::new(f)
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            == changed_file_name
                     }) {
                         new_index = index;
                     }
                     // If still not found, default to 0 (first file)
                 }
-                
+
                 state.current_file_index = new_index;
                 // Don't reset scroll position here - let auto-scroll handle it
             }
-            
+
             state.changed_files = changed_files;
             state.last_update = Some(Utc::now());
         }
@@ -750,7 +792,10 @@ impl App {
             .output()?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("Git command failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow::anyhow!(
+                "Git command failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -763,7 +808,10 @@ impl App {
             .output()?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("Git diff failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow::anyhow!(
+                "Git diff failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -776,27 +824,29 @@ impl App {
             .output()?;
 
         if !output.status.success() {
-            return Err(anyhow::anyhow!("Git diff --name-only failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(anyhow::anyhow!(
+                "Git diff --name-only failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         let files = String::from_utf8_lossy(&output.stdout);
         let files: Vec<String> = files.trim().lines().map(|s| s.to_string()).collect();
-        
+
         // Update file modification times
         self.update_file_times(&files);
-        
+
         Ok(files)
     }
 
     fn update_file_times(&self, files: &[String]) {
         let mut state = self.state.lock().unwrap();
-        
+
         for file in files {
             let file_path = self.directory.join(file);
             if let Ok(metadata) = fs::metadata(&file_path) {
                 if let Ok(modified) = metadata.modified() {
                     let file_info = FileInfo {
-                        path: file.clone(),
                         last_modified: modified,
                     };
                     state.file_info.insert(file.clone(), file_info);
@@ -804,7 +854,6 @@ impl App {
             }
         }
     }
-
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -835,7 +884,7 @@ async fn setup_file_watcher(directory: PathBuf, app_state: Arc<Mutex<AppState>>)
         move |res: Result<NotifyEvent, notify::Error>| {
             if let Ok(event) = res {
                 if let Err(e) = tx.blocking_send(event) {
-                    eprintln!("Error sending file event: {}", e);
+                    eprintln!("Error sending file event: {e}");
                 }
             }
         },
@@ -852,23 +901,23 @@ async fn setup_file_watcher(directory: PathBuf, app_state: Arc<Mutex<AppState>>)
         if let Some(path) = event.paths.first() {
             let path_clone = path.clone();
             let now = Instant::now();
-            
+
             // Debounce: only process if it's been more than 1 second since last event for this path
             if let Some(last_time) = debounce_map.get(&path_clone) {
                 if now.duration_since(*last_time) < Duration::from_secs(1) {
                     continue;
                 }
             }
-            
+
             debounce_map.insert(path_clone.clone(), now);
-            
+
             // Handle the file change
             let mut app_clone = App::new(app.directory.clone());
             app_clone.state = app_state_clone.clone();
-            
+
             tokio::spawn(async move {
                 if let Err(e) = app_clone.handle_file_change(&path_clone).await {
-                    eprintln!("Error handling file change: {}", e);
+                    eprintln!("Error handling file change: {e}");
                 }
             });
         }
@@ -880,7 +929,7 @@ async fn setup_file_watcher(directory: PathBuf, app_state: Arc<Mutex<AppState>>)
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    
+
     // Verify the directory exists and is a git repository BEFORE setting up terminal
     if !args.directory.exists() {
         eprintln!("Error: Directory does not exist: {:?}", args.directory);
@@ -891,7 +940,10 @@ async fn main() -> Result<()> {
     }
 
     if !args.directory.join(".git").exists() {
-        eprintln!("Error: Directory is not a git repository: {:?}", args.directory);
+        eprintln!(
+            "Error: Directory is not a git repository: {:?}",
+            args.directory
+        );
         eprintln!("Please navigate to a git repository or initialize one:");
         eprintln!("   git init");
         eprintln!("   git add .");
@@ -909,18 +961,14 @@ async fn main() -> Result<()> {
     // Set up panic handler to restore terminal
     std::panic::set_hook(Box::new(|_info| {
         let _ = disable_raw_mode();
-        let _ = execute!(
-            io::stdout(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        );
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         eprintln!("Application panicked! Terminal has been restored.");
         eprintln!("Please report this issue if it persists.");
     }));
 
     // Create app
     let mut app = App::new(args.directory.clone());
-    
+
     // Load initial state immediately
     if let Err(e) = app.load_initial_state().await {
         // Restore terminal before showing error
@@ -931,22 +979,22 @@ async fn main() -> Result<()> {
             DisableMouseCapture
         )?;
         terminal.show_cursor()?;
-        
-        eprintln!("Error loading initial state: {}", e);
+
+        eprintln!("Error loading initial state: {e}");
         eprintln!("Make sure you're in a git repository with some changes.");
         eprintln!("   Try making a change to a file and run again.");
         exit(1);
     }
-    
+
     // Start file watcher in background
     let watcher_state = app.state.clone();
     let watcher_directory = args.directory.clone();
     tokio::spawn(async move {
         if let Err(e) = setup_file_watcher(watcher_directory, watcher_state).await {
-            eprintln!("File watcher error: {}", e);
+            eprintln!("File watcher error: {e}");
         }
     });
-    
+
     // Main event loop
     let result = async {
         loop {
@@ -966,7 +1014,7 @@ async fn main() -> Result<()> {
                                 app_clone.state = app.state.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) = app_clone.load_initial_state().await {
-                                        eprintln!("Error during manual refresh: {}", e);
+                                        eprintln!("Error during manual refresh: {e}");
                                     }
                                 });
                             }
@@ -1019,7 +1067,8 @@ async fn main() -> Result<()> {
             }
         }
         Ok::<(), anyhow::Error>(())
-    }.await;
+    }
+    .await;
 
     // Always restore terminal, regardless of how we exit
     disable_raw_mode()?;
@@ -1032,10 +1081,10 @@ async fn main() -> Result<()> {
 
     // Handle any errors that occurred during the main loop
     if let Err(e) = result {
-        eprintln!("Application error: {}", e);
+        eprintln!("Application error: {e}");
         eprintln!("Terminal has been restored. Please report this issue if it persists.");
         exit(1);
     }
 
     Ok(())
-} 
+}
