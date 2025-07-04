@@ -1,1 +1,8 @@
 ﻿Original content in file 2
+
+
+MODIFIED line added to file 2!
+Different change in
+
+ file 2
+Test change for file2 - 07/04/2025 19:23:10

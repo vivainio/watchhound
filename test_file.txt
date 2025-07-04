@@ -1,3 +1,4 @@
 Hello, this is a test file for WatchHound!
 
-This file will be modified to show how the application works. 
+This file will be modified to show how the application works. Testing immediate loading feature
+Test change for WatchHound

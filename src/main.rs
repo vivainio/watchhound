@@ -176,15 +176,12 @@ impl App {
 
 
     fn render(&mut self, f: &mut Frame) {
-        eprintln!("DEBUG: Render function called");
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)].as_ref())
             .split(f.size());
 
-        eprintln!("DEBUG: About to lock state in render");
         let state = self.state.lock().unwrap();
-        eprintln!("DEBUG: State locked successfully in render");
         
         // Pre-compute file modification status to avoid deadlock
         let file_mod_status: HashMap<String, bool> = state.file_info.iter()
@@ -199,30 +196,24 @@ impl App {
             .collect();
         
         // Left pane - git stat
-        eprintln!("DEBUG: Creating left block");
         let left_block = Block::default()
             .title("Git Status")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White));
 
-        eprintln!("DEBUG: About to format git stat text");
         let git_stat_text = if state.git_stat.is_empty() {
             Text::from("No changes detected")
         } else {
             Self::format_git_stat_with_status(&state.git_stat, &file_mod_status)
         };
-        eprintln!("DEBUG: Git stat text formatted");
 
         let git_stat_paragraph = Paragraph::new(git_stat_text)
             .block(left_block)
             .wrap(Wrap { trim: true });
 
-        eprintln!("DEBUG: Rendering left widget");
         f.render_widget(git_stat_paragraph, chunks[0]);
-        eprintln!("DEBUG: Left widget rendered");
 
         // Right pane - git diff
-        eprintln!("DEBUG: Creating right pane");
         let right_title = if !state.changed_files.is_empty() {
             let current_file = &state.changed_files[state.current_file_index];
             let is_recent = file_mod_status.get(current_file).unwrap_or(&false);
@@ -237,22 +228,18 @@ impl App {
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White));
 
-        eprintln!("DEBUG: About to format git diff text");
         let git_diff_text = if state.git_diff.is_empty() {
             Text::from("No changes to show")
         } else {
             Self::format_diff_text(&state.git_diff)
         };
-        eprintln!("DEBUG: Git diff text formatted");
 
         let git_diff_paragraph = Paragraph::new(git_diff_text)
             .block(right_block)
             .wrap(Wrap { trim: true })
             .scroll((state.scroll_position, 0));
 
-        eprintln!("DEBUG: Rendering right widget");
         f.render_widget(git_diff_paragraph, chunks[1]);
-        eprintln!("DEBUG: Right widget rendered");
 
         // Show error message if any
         if let Some(error) = &state.error_message {
@@ -289,7 +276,6 @@ impl App {
             .style(Style::default().fg(Color::Gray));
         
         f.render_widget(status_paragraph, status_area);
-        eprintln!("DEBUG: Render function completed");
     }
 
     fn navigate_to_previous_file(&self) {
@@ -408,13 +394,12 @@ impl App {
             state.git_diff = "No changes to display.\n\nTo see colorized diffs:\n1. Make changes to files\n2. Use 'r' to refresh\n3. Use Left/Right to navigate files\n4. Use Space to scroll\n\nRecently changed files will be highlighted!".to_string();
         }
 
-        eprintln!("DEBUG: Initial state loaded successfully");
         Ok(())
     }
 
-    async fn handle_file_change(&self, _path: &Path) -> Result<()> {
-        // Wait 5 seconds before processing
-        sleep(Duration::from_secs(5)).await;
+    async fn handle_file_change(&self, path: &Path) -> Result<()> {
+        // Wait 1 second before processing
+        sleep(Duration::from_secs(1)).await;
 
         // Clear error message
         {
@@ -446,12 +431,32 @@ impl App {
         {
             let mut state = self.state.lock().unwrap();
             state.git_stat = git_stat;
-            state.changed_files = changed_files;
-            // Reset to first file if files changed
-            if !state.changed_files.is_empty() {
-                state.current_file_index = 0;
+            
+            // Find the index of the changed file to display it
+            let changed_file_path = path.to_string_lossy().to_string();
+            let mut new_index = 0;
+            
+            if !changed_files.is_empty() {
+                // Try to find the exact file that changed
+                if let Some(index) = changed_files.iter().position(|f| f == &changed_file_path) {
+                    new_index = index;
+                } else {
+                    // If exact match not found, try to find files that end with the same relative path
+                    // This handles cases where the watcher might give absolute paths but git gives relative paths
+                    let changed_file_name = path.file_name().unwrap_or_default().to_string_lossy();
+                    if let Some(index) = changed_files.iter().position(|f| {
+                        Path::new(f).file_name().unwrap_or_default().to_string_lossy() == changed_file_name
+                    }) {
+                        new_index = index;
+                    }
+                    // If still not found, default to 0 (first file)
+                }
+                
+                state.current_file_index = new_index;
                 state.scroll_position = 0;
             }
+            
+            state.changed_files = changed_files;
             state.last_update = Some(Utc::now());
         }
 
@@ -575,9 +580,9 @@ async fn setup_file_watcher(directory: PathBuf, app_state: Arc<Mutex<AppState>>)
             let path_clone = path.clone();
             let now = Instant::now();
             
-            // Debounce: only process if it's been more than 5 seconds since last event for this path
+            // Debounce: only process if it's been more than 1 second since last event for this path
             if let Some(last_time) = debounce_map.get(&path_clone) {
-                if now.duration_since(*last_time) < Duration::from_secs(5) {
+                if now.duration_since(*last_time) < Duration::from_secs(1) {
                     continue;
                 }
             }
@@ -603,9 +608,6 @@ async fn setup_file_watcher(directory: PathBuf, app_state: Arc<Mutex<AppState>>)
 async fn main() -> Result<()> {
     let args = Args::parse();
     
-    println!("DEBUG: Starting WatchHound");
-    println!("DEBUG: Directory: {:?}", args.directory);
-    
     // Verify the directory exists and is a git repository BEFORE setting up terminal
     if !args.directory.exists() {
         eprintln!("Error: Directory does not exist: {:?}", args.directory);
@@ -624,17 +626,12 @@ async fn main() -> Result<()> {
         exit(1);
     }
 
-    println!("DEBUG: Directory validation passed");
-
     // Setup terminal (only after validation)
-    println!("DEBUG: Setting up terminal");
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
-    eprintln!("DEBUG: Terminal setup complete");
 
     // Set up panic handler to restore terminal
     std::panic::set_hook(Box::new(|_info| {
@@ -649,11 +646,9 @@ async fn main() -> Result<()> {
     }));
 
     // Create app
-    eprintln!("DEBUG: Creating app");
     let mut app = App::new(args.directory.clone());
     
     // Load initial state immediately
-    eprintln!("DEBUG: Loading initial state");
     if let Err(e) = app.load_initial_state().await {
         // Restore terminal before showing error
         disable_raw_mode()?;
@@ -670,8 +665,6 @@ async fn main() -> Result<()> {
         exit(1);
     }
     
-    eprintln!("DEBUG: Initial state loaded, starting file watcher");
-    
     // Start file watcher in background
     let watcher_state = app.state.clone();
     let watcher_directory = args.directory.clone();
@@ -680,29 +673,21 @@ async fn main() -> Result<()> {
             eprintln!("File watcher error: {}", e);
         }
     });
-
-    eprintln!("DEBUG: Entering main loop");
     
     // Main event loop
     let result = async {
         loop {
-            eprintln!("DEBUG: About to draw terminal");
             terminal.draw(|f| app.render(f))?;
-            eprintln!("DEBUG: Terminal draw completed");
 
             // Handle input events
-            eprintln!("DEBUG: Polling for events");
             if event::poll(Duration::from_millis(100))? {
-                eprintln!("DEBUG: Event detected");
                 if let Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press {
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => {
-                                eprintln!("DEBUG: Quit requested");
                                 app.should_quit = true;
                             }
                             KeyCode::Char('r') => {
-                                eprintln!("DEBUG: Refresh requested");
                                 // Manual refresh
                                 let mut app_clone = App::new(app.directory.clone());
                                 app_clone.state = app.state.clone();
@@ -713,7 +698,6 @@ async fn main() -> Result<()> {
                                 });
                             }
                             KeyCode::Left => {
-                                eprintln!("DEBUG: Left arrow pressed");
                                 app.navigate_to_previous_file();
                                 let mut app_clone = App::new(app.directory.clone());
                                 app_clone.state = app.state.clone();
@@ -722,7 +706,6 @@ async fn main() -> Result<()> {
                                 });
                             }
                             KeyCode::Right => {
-                                eprintln!("DEBUG: Right arrow pressed");
                                 app.navigate_to_next_file();
                                 let mut app_clone = App::new(app.directory.clone());
                                 app_clone.state = app.state.clone();
@@ -731,27 +714,20 @@ async fn main() -> Result<()> {
                                 });
                             }
                             KeyCode::Char(' ') => {
-                                eprintln!("DEBUG: Space pressed");
                                 app.scroll_down();
                             }
                             _ => {}
                         }
                     }
                 }
-            } else {
-                eprintln!("DEBUG: No event detected, continuing loop");
             }
 
             if app.should_quit {
-                eprintln!("DEBUG: Quit requested, breaking loop");
                 break;
             }
-            eprintln!("DEBUG: End of loop iteration");
         }
         Ok::<(), anyhow::Error>(())
     }.await;
-
-    eprintln!("DEBUG: Main loop ended");
 
     // Always restore terminal, regardless of how we exit
     disable_raw_mode()?;
@@ -762,8 +738,6 @@ async fn main() -> Result<()> {
     )?;
     terminal.show_cursor()?;
 
-    eprintln!("DEBUG: Terminal restored");
-
     // Handle any errors that occurred during the main loop
     if let Err(e) = result {
         eprintln!("Application error: {}", e);
@@ -771,6 +745,5 @@ async fn main() -> Result<()> {
         exit(1);
     }
 
-    eprintln!("DEBUG: Application ended normally");
     Ok(())
 } 
