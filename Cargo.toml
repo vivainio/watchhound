@@ -1,0 +1,16 @@
+[package]
+name = "watchhound"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+crossterm = "0.27"
+ratatui = "0.24"
+notify = "6.1"
+tokio = { version = "1.0", features = ["full"] }
+git2 = "0.18"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3" 
