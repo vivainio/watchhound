@@ -365,11 +365,37 @@ impl App {
         let previous_lines: Vec<&str> = previous_diff.lines().collect();
         
         // Find the first line that's different between current and previous diff
+        let mut first_different_line = None;
         for (i, current_line) in current_lines.iter().enumerate() {
             if i >= previous_lines.len() || current_line != &previous_lines[i] {
-                // Found the first different line, scroll to it with some context
-                return (i as u16).saturating_sub(2);
+                first_different_line = Some(i);
+                break;
             }
+        }
+        
+        if let Some(diff_start) = first_different_line {
+            // Now find the first actual content change (+ or - line) starting from the different line
+            for (i, line) in current_lines.iter().enumerate().skip(diff_start) {
+                if line.starts_with('+') && !line.starts_with("+++") {
+                    // Found the first addition, scroll to show it with context
+                    return (i as u16).saturating_sub(3);
+                } else if line.starts_with('-') && !line.starts_with("---") {
+                    // Found the first deletion, scroll to show it with context
+                    return (i as u16).saturating_sub(3);
+                } else if line.starts_with("@@") {
+                    // Found a hunk header, look for content changes after it
+                    for (j, content_line) in current_lines.iter().enumerate().skip(i + 1) {
+                        if content_line.starts_with('+') && !content_line.starts_with("+++") {
+                            return (j as u16).saturating_sub(3);
+                        } else if content_line.starts_with('-') && !content_line.starts_with("---") {
+                            return (j as u16).saturating_sub(3);
+                        }
+                    }
+                }
+            }
+            
+            // If no content changes found, just scroll to the first different line
+            return (diff_start as u16).saturating_sub(2);
         }
         
         // If we get here, current diff is same as previous (shouldn't happen)
