@@ -44,7 +44,8 @@ Features:
 
 Controls:
 - Left/Right: Navigate between changed files
-- Space: Scroll down through diffs
+- Up/Down: Scroll up/down through diffs (5 lines at a time)
+- Space: Scroll down through diffs (1 line at a time)
 - 'r': Manual refresh
 - 'c': Clear diff history
 - 'h': Toggle history view (current file vs accumulated history)
@@ -319,6 +320,21 @@ impl App {
         state.scroll_position += 1;
     }
 
+    fn scroll_up(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.scroll_position = state.scroll_position.saturating_sub(1);
+    }
+
+    fn scroll_down_fast(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.scroll_position += 5;
+    }
+
+    fn scroll_up_fast(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.scroll_position = state.scroll_position.saturating_sub(5);
+    }
+
     fn add_diff_to_history(&self, diff_content: String, file_name: String) {
         let mut state = self.state.lock().unwrap();
         
@@ -507,21 +523,8 @@ impl App {
         };
 
         if store_in_history {
-            // Find the previous diff for incremental change calculation
-            let previous_diff = {
-                let state = self.state.lock().unwrap();
-                state.diff_history.iter()
-                    .rev()
-                    .find(|entry| entry.file_name == current_file)
-                    .map(|entry| entry.diff_content.clone())
-            };
-            
-            // Calculate scroll position for the first different line
-            let scroll_position = if let Some(ref prev_diff) = previous_diff {
-                self.find_first_diff_line(&git_diff, prev_diff)
-            } else {
-                self.calculate_smart_scroll_position(&git_diff)
-            };
+            // Calculate scroll position to show the most recent changes (last additions)
+            let scroll_position = self.calculate_smart_scroll_position(&git_diff);
             
             // Store the diff in history
             self.add_diff_to_history(git_diff.clone(), current_file.clone());
@@ -943,6 +946,12 @@ async fn main() -> Result<()> {
                             }
                             KeyCode::Char(' ') => {
                                 app.scroll_down();
+                            }
+                            KeyCode::Up => {
+                                app.scroll_up_fast();
+                            }
+                            KeyCode::Down => {
+                                app.scroll_down_fast();
                             }
                             KeyCode::Char('c') => {
                                 // Clear diff history
