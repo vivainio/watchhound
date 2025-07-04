@@ -425,19 +425,20 @@ impl App {
 
     fn calculate_smart_scroll_position(&self, diff_content: &str) -> u16 {
         let lines: Vec<&str> = diff_content.lines().collect();
-        let mut last_addition_line = 0u16;
+        let mut first_addition_line = None;
         
-        // Find the last line that contains an addition (starts with +)
+        // Find the first line that contains an addition (starts with +)
         for (i, line) in lines.iter().enumerate() {
             if line.starts_with('+') && !line.starts_with("+++") {
-                last_addition_line = i as u16;
+                first_addition_line = Some(i as u16);
+                break; // Found the first addition, stop looking
             }
         }
         
         // If we found additions, scroll to show them (with some context)
-        if last_addition_line > 0 {
+        if let Some(first_line) = first_addition_line {
             // Show the addition with some context lines before it
-            last_addition_line.saturating_sub(3)
+            first_line.saturating_sub(3)
         } else {
             // If no additions found, look for the end of the diff
             let total_lines = lines.len() as u16;
@@ -523,8 +524,23 @@ impl App {
         };
 
         if store_in_history {
-            // Calculate scroll position to show the most recent changes (last additions)
-            let scroll_position = self.calculate_smart_scroll_position(&git_diff);
+            // Find the previous diff for this file to compare against
+            let previous_diff = {
+                let state = self.state.lock().unwrap();
+                state.diff_history.iter()
+                    .rev()
+                    .find(|entry| entry.file_name == current_file)
+                    .map(|entry| entry.diff_content.clone())
+            };
+            
+            // Calculate scroll position based on what's actually new
+            let scroll_position = if let Some(ref prev_diff) = previous_diff {
+                // Find the first line that's different from the previous diff
+                self.find_first_diff_line(&git_diff, prev_diff)
+            } else {
+                // No previous diff, use smart scrolling to find first addition
+                self.calculate_smart_scroll_position(&git_diff)
+            };
             
             // Store the diff in history
             self.add_diff_to_history(git_diff.clone(), current_file.clone());
