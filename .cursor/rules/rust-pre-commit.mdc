@@ -1,0 +1,52 @@
+---
+globs: *.rs
+description: Rust formatting and linting requirements before commits
+---
+
+# Rust Pre-Commit Quality Checks
+
+Before committing any Rust code, always run these commands to ensure code quality:
+
+## Required Commands Before Commit
+
+1. **Format Check**: Run `cargo fmt --check` to verify code formatting
+   - If it fails, run `cargo fmt` to auto-format the code
+   - All Rust code must follow standard formatting conventions
+
+2. **Clippy Linting**: Run `cargo clippy --all-targets --all-features -- -D warnings`
+   - Fix all clippy warnings before committing
+   - Clippy helps catch common mistakes and suggests improvements
+   - Use `--all-targets` to check all code including tests and examples
+   - Use `--all-features` to check all feature combinations
+
+3. **Code Check**: Run `cargo check --all-targets --all-features`
+   - Ensures the code compiles without errors
+   - Validates all dependencies and features
+
+## Recommended Workflow
+
+```bash
+# Before committing:
+cargo fmt --check || cargo fmt
+cargo clippy --all-targets --all-features -- -D warnings
+cargo check --all-targets --all-features
+cargo test
+```
+
+## Git Hook Setup (Optional)
+
+Consider setting up a pre-commit hook to automate these checks:
+
+```bash
+# Create .git/hooks/pre-commit
+#!/bin/sh
+echo "Running Rust pre-commit checks..."
+cargo fmt --check || (echo "❌ Code not formatted. Run 'cargo fmt'" && exit 1)
+cargo clippy --all-targets --all-features -- -D warnings || (echo "❌ Clippy warnings found" && exit 1)
+cargo check --all-targets --all-features || (echo "❌ Code doesn't compile" && exit 1)
+echo "✅ All checks passed"
+```
+
+## Integration with CI/CD
+
+This project uses GitHub Actions for CI/CD pipeline defined in [.github/workflows/ci.yml](mdc:.github/workflows/ci.yml) which automatically runs these same checks on every push and pull request.
