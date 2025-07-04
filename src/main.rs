@@ -367,8 +367,6 @@ impl App {
         state.scroll_position += 1;
     }
 
-
-
     fn scroll_down_fast(&self) {
         let mut state = self.state.lock().unwrap();
         state.scroll_position += 5;
@@ -413,13 +411,17 @@ impl App {
         if let Some(diff_start) = first_different_line {
             // Now find the first actual content change (+ or - line) starting from the different line
             for (i, line) in current_lines.iter().enumerate().skip(diff_start) {
-                if (line.starts_with('+') && !line.starts_with("+++")) || (line.starts_with('-') && !line.starts_with("---")) {
+                if (line.starts_with('+') && !line.starts_with("+++"))
+                    || (line.starts_with('-') && !line.starts_with("---"))
+                {
                     // Found the first addition or deletion, scroll to show it with context
                     return (i as u16).saturating_sub(3);
                 } else if line.starts_with("@@") {
                     // Found a hunk header, look for content changes after it
                     for (j, content_line) in current_lines.iter().enumerate().skip(i + 1) {
-                        if (content_line.starts_with('+') && !content_line.starts_with("+++")) || (content_line.starts_with('-') && !content_line.starts_with("---")) {
+                        if (content_line.starts_with('+') && !content_line.starts_with("+++"))
+                            || (content_line.starts_with('-') && !content_line.starts_with("---"))
+                        {
                             return (j as u16).saturating_sub(3);
                         }
                     }
