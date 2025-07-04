@@ -157,7 +157,7 @@ impl App {
     fn format_diff_text(diff_text: &str) -> Text<'static> {
         let lines: Vec<Line> = diff_text
             .lines()
-            .map(|line| Self::parse_diff_line(line))
+            .map(Self::parse_diff_line)
             .collect();
 
         Text::from(lines)
