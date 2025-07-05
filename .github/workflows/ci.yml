@@ -85,6 +85,41 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
       
+      - name: Verify build output (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          echo "Checking if build output exists:"
+          ls -la target/${{ matrix.target }}/release/
+          echo "Looking for: ${{ matrix.artifact_name }}"
+          if [ -f "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" ]; then
+            echo "✅ Build artifact found: ${{ matrix.artifact_name }}"
+            ls -la "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+          else
+            echo "❌ Build artifact not found: ${{ matrix.artifact_name }}"
+            echo "Available files:"
+            ls -la target/${{ matrix.target }}/release/
+            exit 1
+          fi
+      
+      - name: Verify build output (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Write-Host "Checking if build output exists:"
+          Get-ChildItem "target\${{ matrix.target }}\release\" | Format-Table
+          Write-Host "Looking for: ${{ matrix.artifact_name }}"
+          $artifactPath = "target\${{ matrix.target }}\release\${{ matrix.artifact_name }}"
+          if (Test-Path $artifactPath) {
+            Write-Host "✅ Build artifact found: ${{ matrix.artifact_name }}"
+            Get-ChildItem $artifactPath | Format-List
+          } else {
+            Write-Host "❌ Build artifact not found: ${{ matrix.artifact_name }}"
+            Write-Host "Available files:"
+            Get-ChildItem "target\${{ matrix.target }}\release\" | Format-Table
+            exit 1
+          }
+      
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -101,14 +136,36 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Verify tag
+        run: |
+          echo "Current ref: ${{ github.ref }}"
+          echo "Tag name: ${{ github.ref_name }}"
+          echo "Repository: ${{ github.repository }}"
+          git tag -l
+          git log --oneline -5
       
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
       
+      - name: List artifacts directory
+        run: |
+          echo "Artifacts directory structure:"
+          find ./artifacts -type f -name "*" | sort
+          echo "Contents of each artifact directory:"
+          for dir in ./artifacts/*/; do
+            echo "Directory: $dir"
+            ls -la "$dir" || echo "Directory not found or empty"
+          done
+          echo "Total files found:"
+          find ./artifacts -type f | wc -l
+      
       - name: Create release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/watchhound-linux-x86_64/watchhound
