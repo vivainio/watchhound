@@ -120,26 +120,68 @@ jobs:
             exit 1
           }
       
-      - name: Prepare artifact directory (Unix)
+      - name: Create archive (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash
         run: |
-          mkdir -p upload/${{ matrix.asset_name }}
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} upload/${{ matrix.asset_name }}/
+          # Create directories
+          mkdir -p upload
+          mkdir -p temp-release
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} temp-release/
+          
+          # Create archive with OS and architecture in name
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            OS_NAME="linux"
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            OS_NAME="macos"
+          else
+            OS_NAME="unknown"
+          fi
+          
+          ARCH="x86_64"
+          VERSION="${{ github.ref_name }}"
+          if [ "$VERSION" = "" ]; then
+            VERSION="dev"
+          fi
+          
+          ARCHIVE_NAME="watchhound-${VERSION}-${OS_NAME}-${ARCH}.tar.gz"
+          tar -czf "upload/${ARCHIVE_NAME}" -C temp-release .
+          echo "Created archive: ${ARCHIVE_NAME}"
       
-      - name: Prepare artifact directory (Windows)
+      - name: Create archive (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path "upload\${{ matrix.asset_name }}" -Force
-          Copy-Item "target\${{ matrix.target }}\release\${{ matrix.artifact_name }}" "upload\${{ matrix.asset_name }}\"
+          # Create directories
+          New-Item -ItemType Directory -Path "upload" -Force
+          New-Item -ItemType Directory -Path "temp-release" -Force
+          Copy-Item "target\${{ matrix.target }}\release\${{ matrix.artifact_name }}" "temp-release\"
+          
+          # Create archive with OS and architecture in name
+          $VERSION = "${{ github.ref_name }}"
+          if ($VERSION -eq "") {
+            $VERSION = "dev"
+          }
+          
+          $ARCHIVE_NAME = "watchhound-${VERSION}-windows-x86_64.zip"
+          Compress-Archive -Path "temp-release\*" -DestinationPath "upload\$ARCHIVE_NAME"
+          Write-Host "Created archive: $ARCHIVE_NAME"
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: upload/${{ matrix.asset_name }}/
+          path: upload/*.tar.gz
           if-no-files-found: error
+        if: matrix.os != 'windows-latest'
+      
+      - name: Upload artifacts (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: upload/*.zip
+          if-no-files-found: error
+        if: matrix.os == 'windows-latest'
 
   release:
     name: Create Release
@@ -183,9 +225,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/watchhound-linux-x86_64/watchhound
-            artifacts/watchhound-windows-x86_64.exe/watchhound.exe
-            artifacts/watchhound-macos-x86_64/watchhound
+            artifacts/watchhound-linux-x86_64/*.tar.gz
+            artifacts/watchhound-windows-x86_64.exe/*.zip
+            artifacts/watchhound-macos-x86_64/*.tar.gz
           generate_release_notes: true
           draft: false
           prerelease: false
