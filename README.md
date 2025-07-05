@@ -92,7 +92,7 @@ The application displays a split-screen interface:
 - `ratatui`: Terminal UI framework
 - `notify`: File system event monitoring
 - `tokio`: Async runtime
-- `git2`: Git operations (backup, mainly using git CLI)
+- Git CLI: Command line git operations for diff and status
 - `anyhow`: Error handling
 - `chrono`: Date/time handling
 
